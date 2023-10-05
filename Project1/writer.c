@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
+#include "macros.h"
 
 // Baudrate settings are defined in <asm/termbits.h>, which is
 // included by <termios.h>
@@ -21,7 +22,16 @@
 
 #define BUF_SIZE 256
 
-volatile int STOP = FALSE;
+int alarmCount = 0;
+int alarmEnabled = FALSE;
+
+void alarmHandler(int signal)
+{
+    alarmEnabled = FALSE;
+    alarmCount++;
+
+    printf("Alarm #%d\n", alarmCount);
+}
 
 int main(int argc, char *argv[])
 {
@@ -68,7 +78,7 @@ int main(int argc, char *argv[])
     // Set input mode (non-canonical, no echo,...)
     newtio.c_lflag = 0;
     newtio.c_cc[VTIME] = 0; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 1;  // Blocking read until 5 chars received
+    newtio.c_cc[VMIN] = 0;  // Blocking read until 5 chars received
 
     // VTIME e VMIN should be changed in order to protect with a
     // timeout the reception of the following character(s)
@@ -89,6 +99,8 @@ int main(int argc, char *argv[])
 
     printf("New termios structure set\n");
 
+    (void)signal(SIGALRM,alarmHandler);
+
     // Create string to send
     unsigned char buf[BUF_SIZE] = {0}; //set up buffer
 
@@ -97,6 +109,7 @@ int main(int argc, char *argv[])
     buf[2] = 0x03;
     buf[3] = buf[1] ^ buf[2];
     buf[4] = 0x7E;
+
 
     // In non-canonical mode, '\n' does not end the writing.
     // Test this condition by placing a '\n' in the middle of the buffer.
@@ -110,15 +123,47 @@ int main(int argc, char *argv[])
 
     usigned char buf_received[BUF_SIZE+1] = {0};
 
-    while(STOP == FALSE) {
-        int bytes = read(fd, buf_received, BUF_SIZE);
-        buf_received[bytes] = '\0';
-        printf(":%s:%d\n", bufrec, bytes);
+    int state = STATE_START;
 
-        //check it is UA
-        if (bufrec[0] == 0x7E && bufrec[2] == 0x07) {
-            STOP = TRUE;
-            printf("Received UA!\n");
+    while(state!=5 && alarmCount < 4) {
+        if(alarmEnabled == FALSE) {
+            int bytes = write(fd, buf, BUF_SIZE);
+            printf("Set up sent! \n");
+
+            alarm(3);
+            alarmEnabled = TRUE;
+        }
+        
+        int bytes = read(fd,buf_received,1);
+
+        if(bytes > 0) {
+            switch(state) {
+                case STATE_START:
+                    if(buf_received[0] == 0x7E) state = STATE_FLAG_RCV;
+                    break;
+                case STATE_FLAG_RCV:
+                    if(buf_received[0] == 0x01) state = STATE_A_RCV;
+                    else if(buf_received[0] == 0x7E) state = STATE_FLAG_RCV;
+                    else state = STATE_START;
+                    break;
+                case STATE_A_RCV:
+                    if (buf_received[0] == UA_CONTROL) state = STATE_C_RCV;
+                    else if (buf_received[0] == FLAG) state = STATE_FLAG_RCV;
+                    else state = STATE_START;
+                    break;
+                case STATE_C_RCV:
+                    if (bufrec[0] == UA_BCC) state = STATE_BCC_OK;
+                    else if (bufrec[0] == FLAG) state = STATE_FLAG_RCV;
+                    else state = STATE_START;
+                    break;
+                case STATE_BCC_OK:
+                    if (bufrec[0] == FLAG) state = STATE_STOP; printf("Received UA!\n");
+                    else state = STATE_START;
+                    break;
+                default:
+                    printf("ERROR: No state! \n");
+                    break;
+            }
         }
     }
 

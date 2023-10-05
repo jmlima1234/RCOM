@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include "macros.h"
 #include <termios.h>
 #include <unistd.h>
 
@@ -67,7 +68,7 @@ int main(int argc, char *argv[])
     // Set input mode (non-canonical, no echo,...)
     newtio.c_lflag = 0;
     newtio.c_cc[VTIME] = 0; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 1;  // Blocking read until 5 chars received
+    newtio.c_cc[VMIN] = 0;  // Blocking read until 5 chars received
 
     // VTIME e VMIN should be changed in order to protect with a
     // timeout the reception of the following character(s)
@@ -88,36 +89,101 @@ int main(int argc, char *argv[])
 
     printf("New termios structure set\n");
 
-    // Loop for input
-    unsigned char buf[BUF_SIZE + 1] = {0}; // +1: Save space for the final '\0' char
+    // UA buffer
+    unsigned char buf[BUF_SIZE] = {0}; // +1: Save space for the final '\0' char
+    buf[0] = 0x7E;
+    buf[1] = 0x03;
+    buf[2] = 0x07;
+    buf[3] = buf[1] ^ buf[2];
+    buf[4] = 0x7E;   
 
-    while (STOP == FALSE)
+    unsigned char buf_received[BUF_SIZE + 1] = {0};
+
+    int state = STATE_START;
+
+    while (state != STATE_STOP)
     {
         // Returns after 5 chars have been input
         int bytes = read(fd, buf, BUF_SIZE);
-        buf[bytes] = '\0'; // Set end of string to '\0', so we can printf
-        printf(":%s:%d\n", buf, bytes);
-        
-        if (buf[0] == 0x7E && buf[2] == 0x03) STOP = TRUE; printf("Received Set up! \n")
+        if(bytes > 0) {
+            switch(state) {
+                case STATE_START:
+                if (buf_received[0] == 0x7E)
+                {
+                    state = STATE_FLAG_RCV;
+                }
+                break;
+            case STATE_FLAG_RCV:
+                if (buf_received[0] == 0x03)
+                {
+                    state = STATE_A_RCV;
+                }
+                else if (buf_received[0] == 0x7E)
+                {
+                    state = STATE_FLAG_RCV;
+                }
+                else
+                {
+                    state = STATE_START;
+                }
+                break;
+            case STATE_A_RCV:
+                if (buf_received[0] == 0x03)
+                {
+                    state = STATE_C_RCV;
+                }
+                else if (buf_received[0] == 0x7E)
+                {
+                    state = STATE_FLAG_RCV;
+                }
+                else
+                {
+                    state = STATE_START;
+                }
+                break;
+            case STATE_C_RCV:
+                if (buf_received[0] == (0x03 ^ 0x03))
+                {
+                    state = STATE_BCC_OK;
+                }
+                else if (buf_received[0] == 0x7E)
+                {
+                    state = STATE_FLAG_RCV;
+                }
+                else
+                {
+                    state = STATE_START;
+                }
+                break;
+            case STATE_BCC_OK:
+                if (buf_received[0] == 0x7E)
+                {
+                    state = STATE_STOP;
+
+                    printf("Received SET UP!\n");
+                    
+                    // Write the buffer in the port
+                    int bytes = write(fd, buf, BUF_SIZE);
+	                printf("UA sent.\n");
+
+                }
+                else
+                {
+                    state = STATE_START;
+                }
+                break;
+            default:
+                printf("ERROR: No state with such name\n");
+                break;
+
+            }
+        }
     }
 
     // The while() cycle should be changed in order to respect the specifications
     // of the protocol indicated in the Lab guide
-
-    buf[0] = 0x7E;
-    buf[1] = 0x01;
-    buf[2] = 0x07;
-    buf[3] = buf[1] ^ buf[2];
-    buf[4] = 0x7E;    
-
-    int bytes = write(fd, buf, BUF_SIZE);
-    printf("%d bytes written\n", bytes);
-
-    sleep(1);
-
-    printf("UA sent! \n");
-
     // Restore the old port settings
+    
     if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
     {
         perror("tcsetattr");
