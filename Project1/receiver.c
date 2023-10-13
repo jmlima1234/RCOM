@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
     while (state != STATE_STOP)
     {
         // Returns after 5 chars have been input
-        int bytes = read(fd, buf, BUF_SIZE);
+        int bytes = read(fd, buf_received, 1);
         if(bytes > 0) {
             switch(state) {
                 case STATE_START:
@@ -164,7 +164,7 @@ int main(int argc, char *argv[])
                     
                     // Write the buffer in the port
                     int bytes = write(fd, buf, BUF_SIZE);
-	                printf("UA sent.\n");
+                    printf("UA sent.\n");
 
                 }
                 else
