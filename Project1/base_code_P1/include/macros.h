@@ -8,7 +8,13 @@
 #define STATE_STOP 5
 
 #define FLAG 0x7E
+#define ESC 0x7D
 #define ADDRESS_S 0x03
 #define ADDRESS_R 0x01
+
 #define CONTROL_SET 0x03
 #define CONTROL_UA 0x07
+#define CONTROL_RR (N) ((N<< 7) || 0x05)
+#define CONTROL_REJ (N) ((N << 7) || 0x01)
+#define CONTROL_INF(N) (N << 6)
+#define CONTROL_DISC 0x0B

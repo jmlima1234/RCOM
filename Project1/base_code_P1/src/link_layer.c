@@ -4,6 +4,12 @@
 
 int alarmCount = 0;
 int alarmEnabled = FALSE;
+int baudRate = 0;
+int nRetransmissions = 0;
+int timeout = 0;
+int tramaT = 0;
+
+int fd = -1;
 
 struct termios oldtio;
 struct termios newtio;
@@ -11,7 +17,7 @@ struct termios newtio;
 void alarmHandler(int signal)
 {
     alarmEnabled = FALSE;
-    alarmCount++;
+    alarmCount--;
 
     printf("--- Alarm #%d ---\n", alarmCount);
 }
@@ -26,10 +32,12 @@ int llopen(LinkLayer connectionParameters)
 {
     unsigned char byte;
     int state = STATE_START;
-    int timeout = connectionParameters.timeout;
-    int alarmCount = connectionParameters.nRetransmissions;
+    timeout = connectionParameters.timeout;
+    nRetransmissions = connectionParameters.nRetransmissions;
+    alarmCount = nRetransmissions;
 
-    int fd = openSerialPort(connectionParameters.serialPort, &oldtio, &newtio);
+
+    fd = openSerialPort(connectionParameters.serialPort, &oldtio, &newtio);
     if (fd < 0) return -1;
     
     switch(connectionParameters.role) {
@@ -44,16 +52,16 @@ int llopen(LinkLayer connectionParameters)
         
         (void)signal(SIGALRM, alarmHandler);
 
-        while (state != STATE_STOP && alarmCount <= timeout){
+        while (state != STATE_STOP && alarmCount != 0){
 
             if (alarmEnabled == FALSE){
                 int bytes = write(fd, buf, 5);
                 sleep(1);
                 printf("SET sent!");
 
-                alarm(0);
+                alarm(timeout);
                 alarmEnabled = TRUE;
-                printf("Alarm!")
+                printf("Alarm!");
             }
 
             if (read(fd, byte, 1) > 0){
@@ -93,6 +101,7 @@ int llopen(LinkLayer connectionParameters)
                 case STATE_BCC_OK:
                 if (byte == FLAG)
                 {
+                    alarm(0);
                     state = STATE_STOP;
                     printf("Received UA!\n");
                 }
@@ -177,10 +186,77 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
-int llwrite(const unsigned char *buf, int bufSize)
-{
-    // TODO
+int llwrite(const unsigned char *buf, int bufSize){
+    int frameSize = bufSize + 6; //{FLAG, A, C, BCC1} + Data size + {BCC2, FLAG}
+    unsigned char *frame = malloc(frameSize);
 
+    frame[0] = FLAG;
+    frame[1] = ADDRESS_S;
+    frame[2] = CONTROL_INF(tramaT);
+    frame[3] = frame[1] ^ frame[2];
+
+    memcpy(frame + 4, buf, bufSize); //passar a data para o frame
+
+    unsigned char BCC2 = buf[0];
+    for(int i = 1; i < bufSize; i++) BCC2 ^= buf[i]; // calcular o bcc2
+
+    for(int i = 4; i < frameSize - 2; i++) { //byte stuffing
+        if(frame[i] == FLAG) {
+            unsigned char byte1 = 0x7D;
+            unsigned char byte2 = 0x5E;
+
+            frameSize++;
+            frame = realloc(frame,frameSize);
+            memmove(frame + i + 1, frame + i, frameSize - i - 1);
+
+            frame[i++] = byte1;
+            frame[i] = byte2;
+        }
+        else if (frame[i] == ESC) {
+            unsigned char byte1 = 0x7D;
+            unsigned char byte2 = 0x5D;
+
+            frameSize++;
+            frame = realloc(frame,frameSize);
+            memmove(frame + i + 1, frame + i, frameSize - i - 1);
+
+            frame[i++] = byte1;
+            frame[i] = byte2;
+        }
+    }
+
+    frame[frameSize-2] = BCC2;
+    frame[frameSize-1] = FLAG;
+    
+
+    int state = STATE_START;
+    alarmCount = nRetransmissions;
+    unsigned char Control;
+
+    (void)signal(SIGALRM, alarmHandler);
+    
+    while (state != STATE_STOP && alarmCount != 0){
+        if(alarmEnabled == FALSE) {
+
+            write(fd,frame,frameSize);
+            alarm(timeout);
+            alarmEnabled = TRUE;
+        }    
+
+        //check control
+        int state2 = STATE_START;
+        unsigned char byte, control_byte;
+        while(state2 != STATE_STOP && alarmEnabled == TRUE) {
+            if(read(fd,byte,1)) {
+                switch(state2) {
+                    case STATE_START:
+                        if(byte == FLAG) state2 = 
+                }
+            }
+        }
+    }
+    
+    free(frame);
     return 0;
 }
 
