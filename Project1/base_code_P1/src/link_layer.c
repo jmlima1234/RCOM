@@ -244,20 +244,60 @@ int llwrite(const unsigned char *buf, int bufSize){
         }    
 
         //check control
-        int state2 = STATE_START;
-        unsigned char byte, control_byte;
-        while(state2 != STATE_STOP && alarmEnabled == TRUE) {
-            if(read(fd,byte,1)) {
-                switch(state2) {
-                    case STATE_START:
-                        if(byte == FLAG) state2 = 
-                }
-            }
+        Control = check_control();
+
+        if (C == C_RR(0) || C == C_RR(1))
+        {
+            state = STOP;
+            tramaT = (tramaT + 1) % 2;
         }
     }
     
+    if (state != STATE_STOP) return -1;
+    
     free(frame);
-    return 0;
+    return frameSize;
+}
+
+int check_control() {
+    unsigned char byte, control;
+    int state = STATE_START;
+    while(state != STATE_STOP && alarmEnabled == TRUE) {
+        if(read(fd,byte,1) > 0) {
+            switch(state) {
+                case STATE_START:
+                    if(byte == FLAG) state = STATE_RCV;
+                    else state = STATE_START;
+                    break;
+                case STATE_RCV:
+                    if(byte == ADDRESS_R) state=STATE_A_RCV;
+                    else state = STATE_START;
+                    break;
+                case STATE_A_RCV:
+                    if(byte == CONTROL_UA || byte= CONTROL_DISC || byte = CONTROL_RR(0) || byte = CONTROL_RR(1) || byte = CONTROL_REJ(0) || byte = CONTROL_REJ(1)) {
+                        control = byte;
+                        state = STATE_C_RCV;
+                    }
+                    else state = STATE_START;
+                    break;
+                case STATE_C_RCV:
+                    if(byte == ADDRESS_R ^ control) state = STATE_BCC_OK;
+                    else if (byte == FLAG) state = STATE_RCV;
+                    else state = STATE_START;
+                    break;
+                case STATE_BCC_OK:
+                    if(byte == FLAG) {
+                        alarm(0);
+                        state = STATE_STOP;
+                    }
+                    else state = STATE_START;
+                    break;
+                default:
+                    break;
+            }       
+        }
+    }
+    return control;
 }
 
 ////////////////////////////////////////////////
