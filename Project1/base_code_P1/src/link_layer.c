@@ -39,7 +39,30 @@ int llopen(LinkLayer connectionParameters)
 
     fd = openSerialPort(connectionParameters.serialPort, &oldtio, &newtio);
     if (fd < 0) return -1;
-    
+
+    /* Será preciso isto?
+    if (tcgetattr(fd, &oldtio) == -1)
+    {
+        perror("tcgetattr");
+        exit(-1);
+    }
+
+    memset(&newtio, 0, sizeof(newtio));
+
+    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
+    newtio.c_iflag = IGNPAR;
+    newtio.c_oflag = 0;
+    newtio.c_lflag = 0;
+    newtio.c_cc[VTIME] = 0;
+    newtio.c_cc[VMIN] = 0;
+
+    tcflush(fd, TCIOFLUSH);
+
+    if (tcsetattr(fd, TCSANOW, &newtio) == -1) {
+        perror("tcsetattr");
+        return -1;
+    }
+    */ 
     switch(connectionParameters.role) {
         case LlTx:
         unsigned char buf[5] = {0}; //set up buffer
@@ -305,8 +328,25 @@ int check_control() {
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    // TODO
+    unsigned char byte;
+    int state = STATE_START;
+    int i = 0; //variável para ir vendo os bytes do packet
 
+    while(state != STATE_STOP) {
+        if(read(fd,byte,1) > 0) {
+            switch(state) {
+                case STATE_START:
+                    if(byte == FLAG) state = STATE_RCV;
+                    break;
+                case STATE_RCV:
+                    if(byte == ADDRESS_S) state = STATE_A_RCV;
+                    else if(byte != FLAG) state = STATE_START;
+                    break;
+                case STATE_A_RCV:
+                
+            }   
+        }
+    }
     return 0;
 }
 

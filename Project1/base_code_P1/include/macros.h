@@ -4,8 +4,9 @@
 #define STATE_RCV 1
 #define STATE_A_RCV 2
 #define STATE_C_RCV 3
-#define STATE_BCC_OK 4
-#define STATE_STOP 5
+#define STATE_DATA 4
+#define STATE_BCC_OK 5
+#define STATE_STOP 6
 
 #define FLAG 0x7E
 #define ESC 0x7D
