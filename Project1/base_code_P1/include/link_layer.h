@@ -39,7 +39,7 @@ typedef struct
 #define TRUE 1
 
 void alarmHandler(int signal);
-int check_control();
+int check_control(int fd);
 
 
 // Open a connection using the "port" parameters defined in struct linkLayer.

@@ -7,9 +7,10 @@ int alarmEnabled = FALSE;
 int baudRate = 0;
 int nRetransmissions = 0;
 int timeout = 0;
-int tramaT = 0;
+unsigned char tramaTx = 0;
+unsigned char tramaRx = 1;
+LinkLayer connection;
 
-int fd = -1;
 
 struct termios oldtio;
 struct termios newtio;
@@ -30,6 +31,7 @@ void alarmHandler(int signal)
 ////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters)
 {
+    connection = connectionParameters;
     unsigned char byte;
     int state = STATE_START;
     timeout = connectionParameters.timeout;
@@ -91,14 +93,14 @@ int llopen(LinkLayer connectionParameters)
                 switch (state){
 
                 case STATE_START:
-                if (byte == FLAG) state = STATE_FLAG_RCV;
+                if (byte == FLAG) state = STATE_RCV;
                 break;
 
                 case STATE_FLAG_RCV:
                 if (byte == ADDRESS_R)
                     state = STATE_A_RCV;
                 else if (byte == FLAG)
-                    state = STATE_FLAG_RCV;
+                    state = STATE_RCV;
                 else
                     state = STATE_START;
                 break;
@@ -107,7 +109,7 @@ int llopen(LinkLayer connectionParameters)
                 if (byte == CONTROL_UA)
                     state = STATE_C_RCV;
                 else if (byte == FLAG)
-                    state = STATE_FLAG_RCV;
+                    state = STATE_RCV;
                 else
                     state = STATE_START;
                 break;
@@ -116,7 +118,7 @@ int llopen(LinkLayer connectionParameters)
                 if (byte == (ADDRESS_R ^ CONTROL_UA))
                     state = STATE_BCC_OK;
                 else if (byte == FLAG)
-                    state = STATE_FLAG_RCV;
+                    state = STATE_RCV;
                 else
                     state = STATE_START;
                 break;
@@ -154,27 +156,27 @@ int llopen(LinkLayer connectionParameters)
             switch(state) {
                 case STATE_START:
                 
-                if (byte == FLAG) state = STATE_FLAG_RCV;
+                if (byte == FLAG) state = STATE_RCV;
                 
                 break;
-                case STATE_FLAG_RCV:
+                case STATE_RCV:
                 
                 if (byte == ADDRESS_S) state = STATE_A_RCV;
-                else if (byte == FLAG) state = STATE_FLAG_RCV;
+                else if (byte == FLAG) state = STATE_RCV;
                 else state = STATE_START;
 
                 break;
                 case STATE_A_RCV:
                 
                 if (byte == CONTROL_SET) state = STATE_C_RCV;
-                else if (byte == FLAG) state = STATE_FLAG_RCV;
+                else if (byte == FLAG) state = STATE_RCV;
                 else state = STATE_START;
 
                 break;
                 case STATE_C_RCV:
 
                 if (byte == (ADDRESS_S ^ CONTROL_SET)) state = STATE_BCC_OK;
-                else if (byte == FLAG) state = STATE_FLAG_RCV;
+                else if (byte == FLAG) state = STATE_RCV;
                 else state = STATE_START;
 
                 break;
@@ -203,19 +205,19 @@ int llopen(LinkLayer connectionParameters)
             break;
     }
 
-    return 0;
+    return fd;
 }
 
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
-int llwrite(const unsigned char *buf, int bufSize){
+int llwrite(int fd, const unsigned char *buf, int bufSize){
     int frameSize = bufSize + 6; //{FLAG, A, C, BCC1} + Data size + {BCC2, FLAG}
     unsigned char *frame = malloc(frameSize);
 
     frame[0] = FLAG;
     frame[1] = ADDRESS_S;
-    frame[2] = CONTROL_INF(tramaT);
+    frame[2] = CONTROL_INF(tramaTx);
     frame[3] = frame[1] ^ frame[2];
 
     memcpy(frame + 4, buf, bufSize); //passar a data para o frame
@@ -267,7 +269,7 @@ int llwrite(const unsigned char *buf, int bufSize){
         }    
 
         //check control
-        Control = check_control();
+        Control = check_control(fd);
 
         if (C == C_RR(0) || C == C_RR(1))
         {
@@ -282,7 +284,7 @@ int llwrite(const unsigned char *buf, int bufSize){
     return frameSize;
 }
 
-int check_control() {
+int check_control(int fd) {
     unsigned char byte, control;
     int state = STATE_START;
     while(state != STATE_STOP && alarmEnabled == TRUE) {
@@ -326,7 +328,7 @@ int check_control() {
 ////////////////////////////////////////////////
 // LLREAD
 ////////////////////////////////////////////////
-int llread(unsigned char *packet)
+int llread(int fd, unsigned char *packet)
 {
     unsigned char byte;
     int state = STATE_START;
@@ -355,7 +357,130 @@ int llread(unsigned char *packet)
 ////////////////////////////////////////////////
 int llclose(int showStatistics)
 {
-    // TODO
+    switch(connection.role) {
+        case LlTx:
+            unsigned char byte;
+            int state = STATE_START;
+            alarmCount = nRetransmissions;
+            
+            (void)signal(SIGALRM, alarmHandler);
 
-    return 1;
+            while(alarmCount != 0 && state != STATE_STOP) {
+                
+                if(alarmEnabled == FALSE) {
+                    sendFrame(fd,ADDRESS_S,CONTROL_DISC);
+                    alarm(timeout);
+                    alarmEnabled = TRUE;
+                }
+
+                if(read(fd,byte,1) > 0) {
+                    switch(state) {
+                        
+                        case STATE_START:
+                            if(byte == FLAG) state = STATE_RCV;
+                            break;
+                        
+                        case STATE_RCV:
+                            if(byte == ADDRESS_R) state = STATE_A_RCV;
+                            else if(byte != FLAG) state = STATE_START;
+                            break;
+
+                        case STATE_A_RCV:
+                            if(byte == CONTROL_DISC) state = STATE_C_RCV;
+                            else if(byte == FLAG) state = STATE_RCV;
+                            else state = STATE_START;
+                            break;
+                        
+                        case STATE_C_RCV:
+                            if(byte == (ADDRESS_R ^ CONTROL_DISC)) state = STATE_BCC_OK;
+                            else if (byte == FLAG) state = STATE_RCV;
+                            else state = STATE_START;
+                            break;
+                        
+                        case STATE_BCC_OK:
+                            if(byte == FLAG) alarm(0); state = STATE_STOP;
+                            else state = STATE_START;
+                            break;
+                        
+                        default:
+                            break;
+                    }
+                }   
+            }
+            sendFrame(fd, ADDRESS_S, CONTROL_UA);
+
+            // Restore the old port settings
+            if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
+            {
+                perror("tcsetattr");
+                exit(-1);
+            }
+
+            return close(fd);
+
+            break;
+        
+        case LlRx:
+            unsigned char byte;
+            int state = STATE_START;
+            while(state != STATE_STOP) {
+                if(read(fd,byte,1) > 0) {
+                    switch(state) {
+                        case STATE_START:
+                            if(byte == FLAG) state = STATE_RCV;
+                            break;
+                        
+                        case STATE_RCV:
+                            if(byte == ADDRESS_S) state = STATE_A_RCV;
+                            else if (byte != FLAG) state = STATE_START;
+                            break;
+                        
+                        case STATE_A_RCV:
+                            if(byte == CONTROL_DISC) state = STATE_C_RCV;
+                            else if(byte == FLAG) state = STATE_RCV;
+                            else state = STATE_START;
+                            break;
+                        
+                        case STATE_C_RCV:
+                            if(byte == (ADDRESS_S ^ CONTROL_DISC)) state = STATE_BCC_OK;
+                            else if(byte == FLAG) state = STATE_RCV;
+                            else state = STATE_START;                    
+                            break;
+
+                        case STATE_BCC_OK:
+                            if(byte == FLAG) {
+                                sendFrame(fd, ADDRESS_R, CONTROL_DISC);
+                                state = STATE_STOP;
+                            }   
+                            else state = STATE_START;
+                            break;
+
+                        default:
+                            break; 
+                    }
+                }
+            }
+            
+            // Restore the old port settings
+            if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
+            {
+                perror("tcsetattr");
+                exit(-1);
+            }
+
+            return close(fd);
+
+            break;        
+
+        default:
+            break;
+    }
+    return -1;
+}
+
+int sendFrame(int fd, unsigned char Address, unsigned char control) {
+    unsigned char frame[5] = {FLAG, Address, control, Address ^ controle, FLAG};
+    write(fd,frame,5);
+    sleep(1);
+    return 0;
 }
