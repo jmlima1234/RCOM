@@ -27,7 +27,7 @@ void alarmHandler(int signal)
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
 int sendFrame(int fd, unsigned char Address, unsigned char control) {
-    unsigned char frame[5] = {FLAG, Address, control, Address ^ controle, FLAG};
+    unsigned char frame[5] = {FLAG, Address, control, Address ^ control, FLAG};
     write(fd,frame,5);
     sleep(1);
     return 0;
@@ -36,7 +36,7 @@ int sendFrame(int fd, unsigned char Address, unsigned char control) {
 
 
 int check_control(int fd, unsigned char Address) {
-    unsigned char byte, control;
+    unsigned char byte, control = 0;
     int state = STATE_START;
     unsigned char previous_alarm_status = alarmEnabled;
 
@@ -52,7 +52,7 @@ int check_control(int fd, unsigned char Address) {
                     else state = STATE_START;
                     break;
                 case STATE_A_RCV:
-                    if(byte == CONTROL_SET || byte == CONTROL_UA || byte= CONTROL_DISC || byte = CONTROL_RR(0) || byte = CONTROL_RR(1) || byte = CONTROL_REJ(0) || byte = CONTROL_REJ(1)) {
+                    if(byte == CONTROL_SET || byte == CONTROL_UA || byte == CONTROL_DISC || byte == CONTROL_RR(0) || byte == CONTROL_RR(1) || byte == CONTROL_REJ(0) || byte = CONTROL_REJ(1)) {
                         control = byte;
                         state = STATE_C_RCV;
                     }
@@ -107,6 +107,7 @@ int openSerialPort(const char *serialPort)
 int llopen(LinkLayer connectionParameters)
 {
     connection = connectionParameters;
+    connection.role = connectionParameters.role;
     baudRate = connectionParameters.baudRate;
     unsigned char byte;
     int state = STATE_START;
@@ -115,7 +116,7 @@ int llopen(LinkLayer connectionParameters)
     alarmCount = nRetransmissions;
 
 
-    int fd = openSerialPort(connectionParameters.serialPort, &oldtio, &newtio);
+    int fd = openSerialPort(connectionParameters.serialPort);
     if (fd < 0) return -1;
 
    
@@ -141,7 +142,7 @@ int llopen(LinkLayer connectionParameters)
         
         case LlRx:
             if(check_control(fd,ADDRESS_S) == CONTROL_SET)  sendFrame(fd,ADDRESS_S,CONTROL_UA);
-            else return -1
+            else return -1;
 
             break;
         default:
@@ -215,8 +216,8 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
 
         if (Control == C_RR(0) || Control == C_RR(1))
         {
-            state = STOP;
-            tramaT = (tramaT + 1) % 2;
+            state = STATE_STOP;
+            tramaTx = (tramaTx + 1) % 2;
         }
 
         else if(Control == CONTROL_REJ(0) || Control == CONTROL_REJ(1)) {
@@ -366,6 +367,8 @@ int llclose(int fd)
         case LlRx:
             alarmCount = nRetransmissions;
             
+            if(check_control(fd,ADDRESS_S) != CONTROL_DISC) return -1;
+
             (void)signal(SIGALRM, alarmHandler);
             while(1) {
                 
@@ -377,7 +380,7 @@ int llclose(int fd)
                     alarmEnabled = TRUE;
                 }
 
-                if(check_control(fd,ADDRESS_S) == CONTROL_DISC) break;
+                if(check_control(fd,ADDRESS_S) == CONTROL_UA) break;
             }
             break; 
         default:
