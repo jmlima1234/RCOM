@@ -39,7 +39,8 @@ typedef struct
 #define TRUE 1
 
 void alarmHandler(int signal);
-int check_control(int fd);
+int check_control(int fd, unsigned char Address);
+int openSerialPort(const char *serialPort);
 
 
 // Open a connection using the "port" parameters defined in struct linkLayer.
@@ -48,11 +49,11 @@ int llopen(LinkLayer connectionParameters);
 
 // Send data in buf with size bufSize.
 // Return number of chars written, or "-1" on error.
-int llwrite(const unsigned char *buf, int bufSize);
+int llwrite(int fd, const unsigned char *buf, int bufSize);
 
 // Receive data in packet.
 // Return number of chars read, or "-1" on error.
-int llread(unsigned char *packet);
+int llread(int fd, unsigned char *packet);
 
 // Close previously opened connection.
 // if showStatistics == TRUE, link layer should print statistics in the console on close.

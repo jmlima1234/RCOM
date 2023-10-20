@@ -11,6 +11,8 @@
 
 #define FLAG 0x7E
 #define ESC 0x7D
+#define AFTER_ESC 0x5D
+#define AFTER_FLAG 0x5E
 #define ADDRESS_S 0x03
 #define ADDRESS_R 0x01
 
