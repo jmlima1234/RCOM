@@ -41,7 +41,7 @@ int check_control(int fd, unsigned char Address) {
     unsigned char previous_alarm_status = alarmEnabled;
 
     while(state != STATE_STOP && alarmEnabled == TRUE) {
-        if(read(fd,byte,1) > 0) {
+        if(read(fd,&byte,1) > 0) {
             switch(state) {
                 case STATE_START:
                     if(byte == FLAG) state = STATE_RCV;
@@ -52,14 +52,14 @@ int check_control(int fd, unsigned char Address) {
                     else state = STATE_START;
                     break;
                 case STATE_A_RCV:
-                    if(byte == CONTROL_SET || byte == CONTROL_UA || byte == CONTROL_DISC || byte == CONTROL_RR(0) || byte == CONTROL_RR(1) || byte == CONTROL_REJ(0) || byte = CONTROL_REJ(1)) {
+                    if(byte == CONTROL_SET || byte == CONTROL_UA || byte == CONTROL_DISC || byte == CONTROL_RR(0) || byte == CONTROL_RR(1) || byte == CONTROL_REJ(0) || byte == CONTROL_REJ(1)) {
                         control = byte;
                         state = STATE_C_RCV;
                     }
                     else state = STATE_START;
                     break;
                 case STATE_C_RCV:
-                    if(byte == Address ^ control) state = STATE_BCC_OK;
+                    if(byte == (Address ^ control)) state = STATE_BCC_OK;
                     else if (byte == FLAG) state = STATE_RCV;
                     else state = STATE_START;
                     break;
@@ -109,8 +109,6 @@ int llopen(LinkLayer connectionParameters)
     connection = connectionParameters;
     connection.role = connectionParameters.role;
     baudRate = connectionParameters.baudRate;
-    unsigned char byte;
-    int state = STATE_START;
     timeout = connectionParameters.timeout;
     nRetransmissions = connectionParameters.nRetransmissions;
     alarmCount = nRetransmissions;
@@ -214,7 +212,7 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
         //check control
         Control = check_control(fd,ADDRESS_R);
 
-        if (Control == C_RR(0) || Control == C_RR(1))
+        if (Control == CONTROL_RR(0) || Control == CONTROL_RR(1))
         {
             state = STATE_STOP;
             tramaTx = (tramaTx + 1) % 2;
@@ -309,7 +307,7 @@ int llread(int fd, unsigned char *packet) {
                             return packetIndex;
                         } else {
                             // Erro de verificação do BCC2, envie REJ
-                            sendFram(fd,ADDRESS_R,CONTROL_REJ(tramaRx));
+                            sendFrame(fd,ADDRESS_R,CONTROL_REJ(tramaRx));
                             return -1; // Retorna erro
                         }
                     } 

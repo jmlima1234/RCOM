@@ -3,6 +3,7 @@
 #include "../include/application_layer.h"
 #include "../include/link_layer.h"
 
+
 unsigned char *parseControlPacket(unsigned char* packet, long int *fileSize)
 {
     unsigned char size_bytes = packet[2];
@@ -29,9 +30,9 @@ void printPacket(const unsigned char *packet, int packetSize) {
 
 unsigned char *getData(unsigned char *data, int dataSize, int *packetSize) {
 
-    packetSize = 3 + dataSize;
+    *packetSize = 3 + dataSize;
 
-    unsigned char *start_packet = (unsigned char *) malloc(packetSize);
+    unsigned char *start_packet = (unsigned char *) malloc(*packetSize);
 
     start_packet[0] = 1;
     start_packet[1] = (unsigned char) dataSize / 256;
@@ -41,14 +42,14 @@ unsigned char *getData(unsigned char *data, int dataSize, int *packetSize) {
     return start_packet;
 }
 
-unsigned char getControl_packet(int control, const char *filename, long int fileSize, int *cpsize) {
+unsigned char *getControl_packet(int control, const char *filename, long int fileSize, int *cpsize) {
     
-    int fileSize_bytes = (int) ceil(log2f((float) fileSize) / 8.0);
+    int fileSize_bytes = (int) ceil(log2f((float)fileSize)/8.0);
     int fileName_bytes = strlen(filename);
 
-    cpsize = 5 + fileSize_bytes + fileName_bytes;
+    *cpsize = 5 + fileSize_bytes + fileName_bytes;
 
-    unsigned char *packet = malloc(cpsize);
+    unsigned char *packet = malloc(*cpsize);
 
     int packet_pos = 0;
     packet[packet_pos++] = control;
@@ -70,7 +71,7 @@ unsigned char getControl_packet(int control, const char *filename, long int file
 void applicationLayer(const char *serialPort, const char *role, int baudRate, int nTries, int timeout, const char *filename){
     LinkLayer Received;
 
-    Received.serialPort = serialPort;
+    strcpy(Received.serialPort,serialPort);
     Received.baudRate = baudRate;
     Received.nRetransmissions = nTries;
     Received.role = strcmp(role, "tx") ? LlRx : LlTx;
@@ -81,8 +82,8 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
     
     switch(Received.role) {
         case LlTx:
-
-        FILE *file = fopen(filename, 'rb');
+        {
+        FILE *file = fopen(filename, "rb");
         if (file == NULL) { 
             printf("File Not Found!\n"); 
             exit(-1); 
@@ -93,7 +94,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         long int fileSize = ftell(file)-previous;
         fseek(file,previous,SEEK_SET);
 
-        unsigned int cpsize;
+        int cpsize;
         unsigned char *Control_packet_start = getControl_packet(2, filename, fileSize, &cpsize);
   
         if(llwrite(fd, Control_packet_start, cpsize) == -1) exit(-1);
@@ -101,7 +102,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         long int bytesLeft = fileSize;
         
         unsigned char *file_data = (unsigned char *) malloc(sizeof(unsigned char) * fileSize);
-        fread(data, sizeof(unsigned char), fileSize, file);
+        fread(file_data, sizeof(unsigned char), fileSize, file);
         
         while(bytesLeft > 0) {
             int dataSize = 0;
@@ -109,7 +110,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
             else dataSize = bytesLeft;
 
             unsigned char* data =(unsigned char*) malloc(dataSize);
-            memcpy(data,fileDate,dataSize);
+            memcpy(data,file_data,dataSize);
 
             int packetSize;
             unsigned char *packet = getData(data,dataSize,&packetSize);
@@ -126,8 +127,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         llclose(fd);
 
         break;
-
-        case LlRx:        
+        }
+        case LlRx:      
+        {  
             unsigned char *packet = (unsigned char *) malloc(MAX_PAYLOAD_SIZE);
             int packetSize = 0;
             long int fileSize;
@@ -165,7 +167,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
             }
             llclose(fd);
             break;
-
+        }
         default:
         exit(-1);
         break;

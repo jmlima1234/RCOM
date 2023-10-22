@@ -18,7 +18,7 @@
 
 #define CONTROL_SET 0x03
 #define CONTROL_UA 0x07
-#define CONTROL_RR(N) ((N<< 7) || 0x05)
-#define CONTROL_REJ(N) ((N << 7) || 0x01)
+#define CONTROL_RR(N) ((N << 7) | 0x05)
+#define CONTROL_REJ(N) ((N << 7) | 0x01)
 #define CONTROL_INF(N) (N << 6)
 #define CONTROL_DISC 0x0B

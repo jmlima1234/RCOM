@@ -13,6 +13,7 @@
 #include <termios.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <math.h>
 #include "macros.h"
 
 typedef enum
