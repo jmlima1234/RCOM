@@ -3,6 +3,29 @@
 #include "../include/application_layer.h"
 #include "../include/link_layer.h"
 
+unsigned char *parseControlPacket(unsigned char* packet, long int *fileSize)
+{
+    unsigned char size_bytes = packet[2];
+    unsigned char name_bytes = packet[4 + size_bytes];
+
+    for (int i = 0; i < (int) size_bytes; i++)
+        *fileSize |= packet[3 + size_bytes - i] << (8 * i);
+
+    unsigned char *name = (unsigned char *) malloc(name_bytes);
+
+    memcpy(name, packet + 3 + size_bytes + 2, name_bytes);
+
+    return name;
+}
+
+void printPacket(const unsigned char *packet, int packetSize) {
+    printf("Received packet with size %d:\n", packetSize);
+    printf("Contents: { ");
+    for (int i = 0; i < packetSize; i++) {
+        printf("%02X ", packet[i]);
+    }
+    printf("}\n\n");
+}
 
 unsigned char *getData(unsigned char *data, int dataSize, int *packetSize) {
 
@@ -104,10 +127,44 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
 
         break;
 
-        case LlRx:
+        case LlRx:        
+            unsigned char *packet = (unsigned char *) malloc(MAX_PAYLOAD_SIZE);
+            int packetSize = 0;
+            long int fileSize;
+            unsigned char *name;
 
-        llclose(fd);
-        break;
+            printf("Waiting for a control packet...\n");
+            while ((packetSize = llread(fd, packet)) < 0);
+
+            printPacket(packet, packetSize);
+
+            printf("Parsing control packet...\n");
+            name = parseControlPacket(packet, &fileSize);
+
+            FILE *newFile = fopen((char *) name, "wb+");
+            printf("Receiving data packets...\n");
+            while (1) {    
+                while ((packetSize = llread(fd, packet)) < 0);
+                if (packet[0] == 1) {
+                    unsigned char *buffer = (unsigned char *) malloc(packetSize);
+                    memcpy(buffer, packet + 3, packetSize - 3);
+                    fwrite(buffer, sizeof(unsigned char), packetSize - 3, newFile);
+                    free(buffer);
+                } else if (packet[0] == 3) {
+                    long int fileSize2;
+                    unsigned char *name2 = parseControlPacket(packet, &fileSize2);
+                    if ((fileSize == fileSize2) && (name == name2)) {
+                        fclose(newFile);
+                        printf("File transfer completed.\n");
+                        break;
+                    }
+                } else {
+                    printf("Invalid packet received. Terminating.\n");
+                    break;
+                }
+            }
+            llclose(fd);
+            break;
 
         default:
         exit(-1);
