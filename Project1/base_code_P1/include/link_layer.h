@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <math.h>
 #include "macros.h"
+#include <time.h>
 
 typedef enum
 {
@@ -41,7 +42,7 @@ typedef struct
 
 void alarmHandler(int signal);
 int check_control(int fd, unsigned char Address);
-int openSerialPort(const char *serialPort);
+int openSerialPort(const char *serialPort, int baudRate);
 
 
 // Open a connection using the "port" parameters defined in struct linkLayer.

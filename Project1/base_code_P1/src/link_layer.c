@@ -8,12 +8,21 @@ int baudRate = 0;
 int nRetransmissions = 0;
 int timeout = 0;
 unsigned char tramaTx = 0;
-unsigned char tramaRx = 1;
+unsigned char tramaRx = 0;
 LinkLayer connection;
 
 
 struct termios oldtio;
 struct termios newtio;
+
+void printFrame(const unsigned char *packet, int packetSize) {
+    printf("Received packet with size %d:\n", packetSize);
+    printf("Contents: { ");
+    for (int i = 0; i < packetSize; i++) {
+        printf("%02X ", packet[i]);
+    }
+    printf("}\n\n");
+}
 
 void alarmHandler(int signal)
 {
@@ -36,12 +45,15 @@ int sendFrame(int fd, unsigned char Address, unsigned char control) {
 
 
 int check_control(int fd, unsigned char Address) {
+
     unsigned char byte, control = 0;
     int state = STATE_START;
     unsigned char previous_alarm_status = alarmEnabled;
 
     while(state != STATE_STOP && alarmEnabled == TRUE) {
+
         if(read(fd,&byte,1) > 0) {
+        printf("byte read - %02x", byte);
             switch(state) {
                 case STATE_START:
                     if(byte == FLAG) state = STATE_RCV;
@@ -55,6 +67,7 @@ int check_control(int fd, unsigned char Address) {
                     if(byte == CONTROL_SET || byte == CONTROL_UA || byte == CONTROL_DISC || byte == CONTROL_RR(0) || byte == CONTROL_RR(1) || byte == CONTROL_REJ(0) || byte == CONTROL_REJ(1)) {
                         control = byte;
                         state = STATE_C_RCV;
+                        printf("control - %02x", control);
                     }
                     else state = STATE_START;
                     break;
@@ -76,27 +89,31 @@ int check_control(int fd, unsigned char Address) {
             }       
         }
     }
+
     return control;
 }
 
-int openSerialPort(const char *serialPort)
+int openSerialPort(const char *serialPort, int baudRate)
 {
     int fd = open(serialPort, O_RDWR | O_NOCTTY);
 
     if (fd < 0) return -1;
 
+
     if (tcgetattr(fd, &oldtio) == -1) return -1;
+
 
     memset(&newtio, 0, sizeof(newtio));
     newtio.c_cflag = baudRate | CS8 | CLOCAL | CREAD;
     newtio.c_iflag = IGNPAR;
     newtio.c_oflag = 0;
     newtio.c_lflag = 0;
-    newtio.c_cc[VTIME] = 1; // Inter-character timer unused
+    newtio.c_cc[VTIME] = 5; // Inter-character timer unused
     newtio.c_cc[VMIN] = 0;  // Read without blocking
     tcflush(fd, TCIOFLUSH);
 
     if (tcsetattr(fd, TCSANOW, &newtio) == -1) return -1;
+
 
     return fd;
 }
@@ -114,10 +131,13 @@ int llopen(LinkLayer connectionParameters)
     alarmCount = nRetransmissions;
 
 
-    int fd = openSerialPort(connectionParameters.serialPort);
+    int fd = openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate);
     if (fd < 0) return -1;
+    
 
-   
+
+    int state = STATE_START;
+    unsigned char byte;   
     switch(connectionParameters.role) {
         case LlTx:
         (void)signal(SIGALRM, alarmHandler);
@@ -133,26 +153,73 @@ int llopen(LinkLayer connectionParameters)
                 alarmEnabled = TRUE;
             }
 
-            if (check_control(fd,ADDRESS_R) == CONTROL_UA) break;
+            if (check_control(fd,ADDRESS_R) == CONTROL_UA) {
+                printf("Received UA! \n");
+                break;
+            }
 
             }
             break;
         
         case LlRx:
-            if(check_control(fd,ADDRESS_S) == CONTROL_SET)  sendFrame(fd,ADDRESS_S,CONTROL_UA);
-            else return -1;
 
-            break;
-        default:
-            return -1;
+ 	    while (state != STATE_STOP){
+
+            if(read(fd, &byte, 1) > 0) {
+                switch(state) {
+                case STATE_START:
+                
+                if (byte == FLAG) state = STATE_RCV;
+                
+                break;
+                case STATE_RCV:
+                
+                if (byte == ADDRESS_S) state = STATE_A_RCV;
+                else if (byte == FLAG) state = STATE_RCV;
+                else state = STATE_START;
+
+                break;
+                case STATE_A_RCV:
+                
+                if (byte == CONTROL_SET) state = STATE_C_RCV;
+                else if (byte == FLAG) state = STATE_RCV;
+                else state = STATE_START;
+
+                break;
+                case STATE_C_RCV:
+
+                if (byte == (ADDRESS_S ^ CONTROL_SET)) state = STATE_BCC_OK;
+                else if (byte == FLAG) state = STATE_RCV;
+                else state = STATE_START;
+
+                break;
+                case STATE_BCC_OK:
+                if (byte == FLAG)
+                {
+                    state = STATE_STOP;
+                    printf("Received SET UP!\n");
+                    sendFrame(fd,ADDRESS_R,CONTROL_UA);
+                }
+                else state = STATE_START;
+                break;
+
+                default:
+                return -1;
+    	        }
+    	    }
+    	}
     }
     return fd;
 }
-
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
 int llwrite(int fd, const unsigned char *buf, int bufSize){
+    printf("Packet to send:\n\n");
+    printf("{ ");
+    for (int i = 0; i < bufSize; i++)
+        printf("%02X ", buf[i]);
+    printf("}\n\n");
     int frameSize = bufSize + 6; //{FLAG, A, C, BCC1} + Data size + {BCC2, FLAG}
     unsigned char *frame = malloc(frameSize);
 
@@ -162,7 +229,7 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
     frame[3] = frame[1] ^ frame[2];
 
     memcpy(frame + 4, buf, bufSize); //passar a data para o frame
-
+            
     unsigned char BCC2 = buf[0];
     for(int i = 1; i < bufSize; i++) BCC2 ^= buf[i]; // calcular o bcc2
 
@@ -171,8 +238,7 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
             unsigned char byte1 = 0x7D;
             unsigned char byte2 = 0x5E;
 
-            frameSize++;
-            frame = realloc(frame,frameSize);
+	    frame = realloc(frame,++frameSize);
             memmove(frame + i + 1, frame + i, frameSize - i - 1);
 
             frame[i++] = byte1;
@@ -182,8 +248,7 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
             unsigned char byte1 = 0x7D;
             unsigned char byte2 = 0x5D;
 
-            frameSize++;
-            frame = realloc(frame,frameSize);
+	    frame = realloc(frame,++frameSize);
             memmove(frame + i + 1, frame + i, frameSize - i - 1);
 
             frame[i++] = byte1;
@@ -194,10 +259,17 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
     frame[frameSize-2] = BCC2;
     frame[frameSize-1] = FLAG;
     
-
+    printf("Frame after-stuffing:\n\n");
+    printf("{ ");
+    for (int i = 0; i < frameSize; i++)
+        printf("%02X ", frame[i]);
+    printf("} %d\n\n", frameSize);
+    
     int state = STATE_START;
     alarmCount = nRetransmissions;
     unsigned char Control;
+    
+    printf("Alarm count - %d  \n ", alarmCount);
 
     (void)signal(SIGALRM, alarmHandler);
     
@@ -215,12 +287,14 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
         if (Control == CONTROL_RR(0) || Control == CONTROL_RR(1))
         {
             state = STATE_STOP;
-            tramaTx = (tramaTx + 1) % 2;
+            tramaTx = (tramaTx+1) % 2;
+                                    printf("RR \n");
         }
 
         else if(Control == CONTROL_REJ(0) || Control == CONTROL_REJ(1)) {
             alarm(0);
             alarmEnabled = FALSE;
+                        printf("REJ \n");
         }
     }
     
@@ -235,6 +309,7 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
 // LLREAD
 ////////////////////////////////////////////////
 int llread(int fd, unsigned char *packet) {
+
     int state = STATE_START;
     unsigned char byte;
     int packetIndex = 0;
@@ -249,6 +324,7 @@ int llread(int fd, unsigned char *packet) {
                     if (byte == FLAG) {
                         state = STATE_RCV;
                     }
+
                     break;
                 case STATE_RCV:
                     if (byte == ADDRESS_S) {
@@ -256,8 +332,10 @@ int llread(int fd, unsigned char *packet) {
                     } else if (byte != FLAG) {
                         state = STATE_START;
                     }
+
                     break;
                 case STATE_A_RCV:
+
                     if (byte == CONTROL_INF(0) || byte == CONTROL_INF(1)) {
                         control = byte; // Armazena o byte de controle
                         state = STATE_C_RCV;
@@ -276,6 +354,7 @@ int llread(int fd, unsigned char *packet) {
                     break;
                 
                 case STATE_C_RCV:
+
                     if (byte == (ADDRESS_S ^ control)) {
                         state = STATE_DATA;
                     } else if (byte == FLAG) {
@@ -286,6 +365,7 @@ int llread(int fd, unsigned char *packet) {
                     }
                     break;
                 case STATE_DATA:
+
                     if (byte == ESC) state = STATE_ESC_FOUND;
                     else if (byte == FLAG) {
                         bcc2 = packet[packetIndex - 1];
@@ -317,6 +397,7 @@ int llread(int fd, unsigned char *packet) {
                     }
                     break;
                 case STATE_ESC_FOUND:
+                    printf("ESC found \n");     
                     state = STATE_DATA;
                     if (byte == AFTER_ESC) {
                         packet[packetIndex++] = ESC;
@@ -389,4 +470,3 @@ int llclose(int fd)
 
     return close(fd);
 }
-

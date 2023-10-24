@@ -71,7 +71,7 @@ unsigned char *getControl_packet(int control, const char *filename, long int fil
 void applicationLayer(const char *serialPort, const char *role, int baudRate, int nTries, int timeout, const char *filename){
     LinkLayer Received;
 
-    strcpy(Received.serialPort,serialPort);
+    Received.serialPort = serialPort;
     Received.baudRate = baudRate;
     Received.nRetransmissions = nTries;
     Received.role = strcmp(role, "tx") ? LlRx : LlTx;
@@ -96,8 +96,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
 
         int cpsize;
         unsigned char *Control_packet_start = getControl_packet(2, filename, fileSize, &cpsize);
-  
+        printf("Going for llwrite! \n");
+
         if(llwrite(fd, Control_packet_start, cpsize) == -1) exit(-1);
+        printPacket(Control_packet_start, cpsize);
 
         long int bytesLeft = fileSize;
         
@@ -105,6 +107,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         fread(file_data, sizeof(unsigned char), fileSize, file);
         
         while(bytesLeft > 0) {
+            printf("Bytes left");
+            printf(" %ld",bytesLeft);            
+
             int dataSize = 0;
             if(bytesLeft > MAX_PAYLOAD_SIZE) dataSize = MAX_PAYLOAD_SIZE;
             else dataSize = bytesLeft;
@@ -116,12 +121,13 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
             unsigned char *packet = getData(data,dataSize,&packetSize);
 
             if(llwrite(fd,packet,packetSize) == -1) exit(-1);
-
+            printf("Packet written!");
             file_data += dataSize;
-            bytesLeft -= dataSize;
+            bytesLeft -= MAX_PAYLOAD_SIZE;
         }
 
         unsigned char *packet_end = getControl_packet(3, filename, fileSize, &cpsize);
+        
         if(llwrite(fd, packet_end, cpsize) == -1) exit(-1);
 
         llclose(fd);
@@ -138,21 +144,31 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
             printf("Waiting for a control packet...\n");
             while ((packetSize = llread(fd, packet)) < 0);
 
-            printPacket(packet, packetSize);
-
+            //printPacket(packet, packetSize);
+            printf("Print done! \n");
+            
             printf("Parsing control packet...\n");
             name = parseControlPacket(packet, &fileSize);
-
-            FILE *newFile = fopen((char *) name, "wb+");
+            printf("Parsed! \n");
+            
+            FILE* newFile = fopen((char *) name, "wb+");
             printf("Receiving data packets...\n");
-            while (1) {    
+            while (1) { 
+            	if(packetSize == 0)  break; 
                 while ((packetSize = llread(fd, packet)) < 0);
+                printf("Received! \n");     
                 if (packet[0] == 1) {
                     unsigned char *buffer = (unsigned char *) malloc(packetSize);
+                                        printf("Created buffer\n");
                     memcpy(buffer, packet + 3, packetSize - 3);
+                                        printf("memcpy \n");
                     fwrite(buffer, sizeof(unsigned char), packetSize - 3, newFile);
+                                        printf("fwrite \n");
                     free(buffer);
+                                        printf("fwrite \n");
+                  
                 } else if (packet[0] == 3) {
+                    printPacket(packet, packetSize);
                     long int fileSize2;
                     unsigned char *name2 = parseControlPacket(packet, &fileSize2);
                     if ((fileSize == fileSize2) && (name == name2)) {
