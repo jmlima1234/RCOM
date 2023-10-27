@@ -37,23 +37,22 @@ void alarmHandler(int signal)
 
 int sendFrame(int fd, unsigned char Address, unsigned char control) {
     unsigned char frame[5] = {FLAG, Address, control, Address ^ control, FLAG};
-    write(fd,frame,5);
-    sleep(1);
-    return 0;
+    return write(fd,&frame,5);
+
 }
 
 
 
-int check_control(int fd, unsigned char Address) {
+unsigned char check_control(int fd, unsigned char Address) {
 
-    unsigned char byte, control = 0;
+    unsigned char byte, control = 0xFF;
     int state = STATE_START;
     unsigned char previous_alarm_status = alarmEnabled;
+    alarmEnabled = TRUE;
 
     while(state != STATE_STOP && alarmEnabled == TRUE) {
 
         if(read(fd,&byte,1) > 0) {
-        printf("byte read - %02x", byte);
             switch(state) {
                 case STATE_START:
                     if(byte == FLAG) state = STATE_RCV;
@@ -65,10 +64,12 @@ int check_control(int fd, unsigned char Address) {
                     break;
                 case STATE_A_RCV:
                     if(byte == CONTROL_SET || byte == CONTROL_UA || byte == CONTROL_DISC || byte == CONTROL_RR(0) || byte == CONTROL_RR(1) || byte == CONTROL_REJ(0) || byte == CONTROL_REJ(1)) {
+
                         control = byte;
                         state = STATE_C_RCV;
-                        printf("control - %02x", control);
+
                     }
+                    else if (byte == FLAG) state = STATE_RCV;
                     else state = STATE_START;
                     break;
                 case STATE_C_RCV:
@@ -154,7 +155,6 @@ int llopen(LinkLayer connectionParameters)
             }
 
             if (check_control(fd,ADDRESS_R) == CONTROL_UA) {
-                printf("Received UA! \n");
                 break;
             }
 
@@ -197,7 +197,6 @@ int llopen(LinkLayer connectionParameters)
                 if (byte == FLAG)
                 {
                     state = STATE_STOP;
-                    printf("Received SET UP!\n");
                     sendFrame(fd,ADDRESS_R,CONTROL_UA);
                 }
                 else state = STATE_START;
@@ -215,11 +214,12 @@ int llopen(LinkLayer connectionParameters)
 // LLWRITE
 ////////////////////////////////////////////////
 int llwrite(int fd, const unsigned char *buf, int bufSize){
-    printf("Packet to send:\n\n");
-    printf("{ ");
-    for (int i = 0; i < bufSize; i++)
-        printf("%02X ", buf[i]);
-    printf("}\n\n");
+    //printf("Packet to send:\n\n");
+    //printf("{ ");
+    //for (int i = 0; i < bufSize; i++)
+        //printf("%02X ", buf[i]);
+    //printf("}\n\n");
+    
     int frameSize = bufSize + 6; //{FLAG, A, C, BCC1} + Data size + {BCC2, FLAG}
     unsigned char *frame = malloc(frameSize);
 
@@ -259,17 +259,17 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
     frame[frameSize-2] = BCC2;
     frame[frameSize-1] = FLAG;
     
-    printf("Frame after-stuffing:\n\n");
-    printf("{ ");
-    for (int i = 0; i < frameSize; i++)
-        printf("%02X ", frame[i]);
-    printf("} %d\n\n", frameSize);
+    //printf("Frame after-stuffing:\n\n");
+    //printf("{ ");
+    //for (int i = 0; i < frameSize; i++)
+        //printf("%02X ", frame[i]);
+    //printf("} %d\n\n", frameSize);
     
     int state = STATE_START;
     alarmCount = nRetransmissions;
     unsigned char Control;
     
-    printf("Alarm count - %d  \n ", alarmCount);
+    //printf("Alarm count - %d  \n ", alarmCount);
 
     (void)signal(SIGALRM, alarmHandler);
     
@@ -288,13 +288,11 @@ int llwrite(int fd, const unsigned char *buf, int bufSize){
         {
             state = STATE_STOP;
             tramaTx = (tramaTx+1) % 2;
-                                    printf("RR \n");
         }
 
         else if(Control == CONTROL_REJ(0) || Control == CONTROL_REJ(1)) {
             alarm(0);
             alarmEnabled = FALSE;
-                        printf("REJ \n");
         }
     }
     
@@ -438,7 +436,9 @@ int llclose(int fd)
                     alarmEnabled = TRUE;
                 }
 
-                if(check_control(fd,ADDRESS_R) == CONTROL_DISC) break;
+                if(check_control(fd,ADDRESS_R) == CONTROL_DISC) {
+                    break;
+                }
             }
             sendFrame(fd,ADDRESS_S, CONTROL_UA);
             break;
@@ -446,7 +446,7 @@ int llclose(int fd)
         case LlRx:
             alarmCount = nRetransmissions;
             
-            if(check_control(fd,ADDRESS_S) != CONTROL_DISC) return -1;
+            while(check_control(fd,ADDRESS_S) != CONTROL_DISC);
 
             (void)signal(SIGALRM, alarmHandler);
             while(1) {
@@ -459,7 +459,9 @@ int llclose(int fd)
                     alarmEnabled = TRUE;
                 }
 
-                if(check_control(fd,ADDRESS_S) == CONTROL_UA) break;
+                if(check_control(fd,ADDRESS_S) == CONTROL_UA) {
+                    break;
+                }
             }
             break; 
         default:
@@ -470,3 +472,4 @@ int llclose(int fd)
 
     return close(fd);
 }
+

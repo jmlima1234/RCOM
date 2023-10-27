@@ -41,7 +41,7 @@ typedef struct
 #define TRUE 1
 
 void alarmHandler(int signal);
-int check_control(int fd, unsigned char Address);
+unsigned char check_control(int fd, unsigned char Address);
 int openSerialPort(const char *serialPort, int baudRate);
 
 
