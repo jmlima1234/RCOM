@@ -1,9 +1,0 @@
-{
-    "files.associations": {
-        "string.h": "c",
-        "signal.h": "c",
-        "link_layer.h": "c",
-        "application_layer.h": "c",
-        "stat.h": "c"
-    }
-}
