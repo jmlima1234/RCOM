@@ -54,6 +54,121 @@ int create_socket(char *ip, int port) {
         perror("connect()");
         exit(-1);
     }
+    return sockfd;
+}
+
+
+int handleAuth(const int sockfd, const char *username, const char *password) {
+    char cmdUser[5 + strlen(username) + 1];
+    char cmdPass[5 + strlen(password) + 1];
+    char response[MAX_LENGTH];
+
+    sprintf(cmdUser, "USER %s\n", username);
+    sprintf(cmdPass, "PASS %s\n", password);
+
+    write(sockfd, cmdUser, strlen(cmdUser));
+    if (getResponse(sockfd, response) != SERVER_READY_FOR_PASS) {
+        printf("Unknown user '%s'. Abort.\n", username);
+        exit(-1);
+    }
+
+    write(sockfd, cmdPass, strlen(cmdPass));
+    return getResponse(sockfd, response);
+}
+
+int enablePassiveMode(const int sockfd, char *ip, int *port) {
+    char response[MAX_LENGTH];
+    int p1, p2, p3, p4, portHigh, portLow;
+
+    write(sockfd, "PASV\n", 5);
+    if (getResponse(sockfd, response) != SERVER_PASSIVE_MODE) return -1;
+
+    sscanf(response, PASSIVE, &p1, &p2, &p3, &p4, &portHigh, &portLow);
+    *port = portHigh * 256 + portLow;
+    sprintf(ip, "%d.%d.%d.%d", p1, p2, p3, p4);
+
+    return SERVER_PASSIVE_MODE;
+}
+
+int getResponse(const int sockfd, char *buffer) {
+    char byte;
+    int idx = 0, code;
+    ResponseState currentState = STATE_START;
+
+    memset(buffer, 0, MAX_LENGTH);
+    while (currentState != STATE_END) {
+        read(sockfd, &byte, 1);
+        switch (currentState) {
+            case STATE_START:
+                if (byte == ' ') currentState = STATE_SINGLE_LINE;
+                else if (byte == '-') currentState = STATE_MULTI_LINE;
+                else if (byte == '\n') currentState = STATE_END;
+                else buffer[idx++] = byte;
+                break;
+            case STATE_SINGLE_LINE:
+                if (byte == '\n') currentState = STATE_END;
+                else buffer[idx++] = byte;
+                break;
+            case STATE_MULTI_LINE:
+                if (byte == '\n') {
+                    memset(buffer, 0, MAX_LENGTH);
+                    currentState = STATE_START;
+                    idx = 0;
+                } else buffer[idx++] = byte;
+                break;
+            case STATE_END:
+                break;
+            default:
+                break;
+        }
+    }
+
+    sscanf(buffer, RESPCODE, &code);
+    return code;
+}
+
+int requestFile(const int sockfd, char *resource) {
+    char requestCmd[5 + strlen(resource) + 1], response[MAX_LENGTH];
+    sprintf(requestCmd, "RETR %s\n", resource);
+    
+    write(sockfd, requestCmd, strlen(requestCmd));
+    return getResponse(sockfd, response);
+}
+
+int downloadData(const int sockfdControl, const int sockfdData, char *filename) {
+    FILE *file = fopen(filename, "wb");
+    if (file == NULL) {
+        printf("Error opening file '%s'\n", filename);
+        exit(-1);
+    }
+
+    char buffer[MAX_LENGTH];
+    int bytesRead;
+    while ((bytesRead = read(sockfdData, buffer, MAX_LENGTH)) > 0) {
+        if (fwrite(buffer, 1, bytesRead, file) != bytesRead) {
+            printf("Error writing to file '%s'.\n", filename);
+            fclose(file);
+            exit(-1);
+        }
+    }
+    fclose(file);
+    
+    return getResponse(sockfdControl, buffer);
+}
+
+
+int closeSockets(const int sockfdControl, int sockfdData) {
+    char response[MAX_LENGTH];
+    write(sockfdControl, "QUIT\n", 5);
+    if (getResponse(sockfdControl, response) != SERVER_GOODBYE) return -1;
+    return close(sockfdControl) || close(sockfdData);
+}
+
+void verifySocketConnection(const int sockfd, char *ip, int port) {
+    if (sockfd < 0) {
+        printf("Failed to connect to %s:%d\n", ip, port);
+        exit(-1);
+    }
 }
 
 
@@ -63,5 +178,49 @@ int main(int argc, char* argv[]) {
         exit(-1);
     } 
     
+    struct URL application;
+    memset(&application, 0, sizeof(application));
+    if (parseFTP(argv[1], &application) != 0) {
+        printf("Parse error. Usage: ./download ftp://[<user>:<password>@]<host>/<url-path>\n");
+        exit(-1);
+    }
+
+    printf("Hostname: %s\nPath: %s\nFilename: %s\nUsername: %s\nPassword: %s\nIP Address: %s\n", application.host, application.resource,application.file,application.user,application.password,application.ip);
+
+    int sockfdControl = create_socket(application.ip, FTP_PORT);
+    char response[MAX_LENGTH];
+    verifySocketConnection(sockfdControl, application.ip, FTP_PORT);
+
+    if (handleAuth(sockfdControl, application.user, application.password) != SERVER_READY_FOR_AUTH) {
+        printf("Authentication failed for user '%s' with password '%s'.\n", application.user,application.password);
+        exit(-1);
+    }
+
+    char dataIP[MAX_LENGTH];
+    int dataPort;
+    if(enablePassiveMode(sockfdControl, dataIP, &dataPort)!= PASSIVE){
+        printf("Passive mode failed\n");
+        exit(-1);
+    }
+
+    int sockfdData = create_socket(dataIP, dataPort);
+    verifySocketConnection(sockfdData, dataIP, dataPort);
+
+    if (requestFile(sockfdControl, application.resource) != READY_FOR_DATA_TRANSFER) {
+        printf("Resource '%s' unavailable.\n", application.resource);
+        exit(-1);
+    }
+
+    if (downloadData(sockfdControl, sockfdData, application.file) != TRANSFER_COMPLETED) {
+        printf("Failed to download file '%s'.\n", application.file);
+        exit(-1);
+    }
+
+    if(closeSockets(sockfdControl, sockfdData)!= 0){
+        printf("Sockets close error.\n");
+        exit(-1);
+    }
+
+    return 0;
 
 }
