@@ -18,6 +18,9 @@ int parseFTP(char *input, struct URL *url) {
         sscanf(input, PASSWORD, url->password);
     }
 
+    sscanf(input, RESOURCE, url->resource);
+    strcpy(url->file, strrchr(input, '/') + 1);
+
     //esta parte foi tirada do ficheiro getip.c
     struct hostent *h;
     if (strlen(url->host) == 0) return -1;
@@ -27,7 +30,8 @@ int parseFTP(char *input, struct URL *url) {
     }
     strcpy(url->ip, inet_ntoa(*((struct in_addr *) h->h_addr)));
 
-    return 0;
+    return !(strlen(url->host) && strlen(url->user) && 
+           strlen(url->password) && strlen(url->resource) && strlen(url->file));
 }
 
 int create_socket(char *ip, int port) {
@@ -66,7 +70,7 @@ int handleAuth(const int sockfd, const char *username, const char *password) {
     sprintf(cmdPass, "PASS %s\n", password);
 
     write(sockfd, cmdUser, strlen(cmdUser));
-    if (getResponse(sockfd, response) != SERVER_READY_FOR_AUTH) {
+    if (getResponse(sockfd, response) != SERVER_READY_FOR_PASS) {
         printf("Unknown user '%s'. Abort.\n", username);
         exit(-1);
     }
@@ -165,14 +169,6 @@ int closeSockets(const int sockfdControl, int sockfdData) {
     return close(sockfdControl) || close(sockfdData);
 }
 
-void verifySocketConnection(const int sockfd, char *ip, int port) {
-    if (sockfd < 0) {
-        printf("Failed to connect to %s:%d\n", ip, port);
-        exit(-1);
-    }
-}
-
-
 int main(int argc, char* argv[]) {
     if (argc != 2) {
         printf("Usage: ./download ftp://[<user>:<password>@]<host>/<url-path>\n");
@@ -191,9 +187,11 @@ int main(int argc, char* argv[]) {
 
     int sockfdControl = create_socket(application.ip, FTP_PORT);
     char response[MAX_LENGTH];
-    verifySocketConnection(sockfdControl, application.ip, FTP_PORT);
-
-    if (handleAuth(sockfdControl, application.user, application.password) != SERVER_READY_FOR_PASS) {
+    if (sockfdControl < 0 || getResponse(sockfdControl, response) != SERVER_READY_FOR_AUTH) {
+        printf("Socket to '%s' and port %d failed\n", application.ip, FTP_PORT);
+        exit(-1);
+    }
+    if (handleAuth(sockfdControl, application.user, application.password) != LOGIN_SUCCESS) {
         printf("Authentication failed for user '%s' with password '%s'.\n", application.user,application.password);
         exit(-1);
     }
@@ -206,7 +204,10 @@ int main(int argc, char* argv[]) {
     }
 
     int sockfdData = create_socket(dataIP, dataPort);
-    verifySocketConnection(sockfdData, dataIP, dataPort);
+    if(sockfdData < 0) {
+        printf("Socket to '%s:%d' failed\n", dataIP, dataPort);
+        exit(-1);
+    }
 
     if (requestFile(sockfdControl, application.resource) != READY_FOR_DATA_TRANSFER) {
         printf("Resource '%s' unavailable.\n", application.resource);

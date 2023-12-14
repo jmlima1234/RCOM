@@ -55,4 +55,3 @@ int getResponse(const int sockfd, char *buffer);
 int requestFile(const int sockfd, char *resource);
 int downloadData(const int sockfdControl,const int sockfdData, char *filename);
 int closeSockets(const int sockfdControl,const int sockfdData);
-void verifySocketConnection(const int sockfd, char *ip, int port);
