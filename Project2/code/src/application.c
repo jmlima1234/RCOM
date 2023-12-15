@@ -86,7 +86,6 @@ int enablePassiveMode(const int sockfd, char *ip, int *port) {
     write(sockfd, "PASV\n", 5);
     if (getResponse(sockfd, response) != SERVER_PASSIVE_MODE) return -1;
 
-    printf("Passei o if");
     sscanf(response, PASSIVE, &p1, &p2, &p3, &p4, &portHigh, &portLow);
     *port = portHigh * 256 + portLow;
     sprintf(ip, "%d.%d.%d.%d", p1, p2, p3, p4);
@@ -128,7 +127,6 @@ int getResponse(const int sockfd, char *buffer) {
     }
 
     sscanf(buffer, RESPCODE, &code);
-    printf("%d",code);
     return code;
 }
 
